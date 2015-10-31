@@ -1,0 +1,1054 @@
+<html>
+
+
+<head>
+	<script src="libs/three.js"></script>
+	<script src="libs/threex.keyboardstate.js"></script>
+	<script src="libs/scenejs.js"></script>
+	<script src="libs/cannon.js"></script>
+	<script src="libs/walljson.js"></script>
+	<script src="libs/cannonDebugRenderer.js"></script>
+	<script src="libs/jquery-1.11.3.js"></script>
+	<script src="libs/bootstrap.js"></script>
+	<script src='font/helvetiker_regular.typeface.js'></script>	
+	<link rel="stylesheet" href="css/whhg.css" >
+	<link rel="stylesheet" href="css/bootstrap.css" >
+</head>
+
+<body>
+	<audio class="audio-player" autoplay loop>
+		<source src="sounds/pacman_bg.mp3">
+	</audio>
+
+	<div id="lives" style="position:absolute; font-size:250%"></div>
+
+	<div style="position: absolute; bottom:3%; right:3%; font-size:200%;">
+		<a href="javascript:void(0)" style="background: transparent;" data-toggle="modal" data-target="#myModal">
+		  <span >Help</span>
+		</a>
+	</div>
+
+	<div style="position:absolute; bottom:2%; left: 1%; font-size: 250%;" >
+		<div id="mute">
+			<a href="javascript:void(0)" id="mute" class="color:white" onclick="muteSound()"><span class="glyphicon glyphicon-volume-off"></span></a>
+		</div>
+		<div id="play">
+			<a href="javascript:void(0)" id="play" class="color:white" onclick="playSound()"><span class="glyphicon glyphicon-volume-up"></span></a>
+		</div>
+	</div>
+	
+	<!-- Modal -->
+	<div class="modal fade" id="myModal" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
+	  <div class="modal-dialog" role="document">
+		<div class="modal-content">
+		  <div class="modal-header">
+			<button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+			<h4 class="modal-title" id="myModalLabel">Techno Pac-Man Rave-athon</h4>
+		  </div>
+		  <div class="modal-body">
+			<h4> Controls </h4>
+			<table>
+				<tr>
+					<td>Turn Left</td>
+					<td>&nbsp;&nbsp; &nbsp;</td>
+					<td> Left arrow key </td>
+				</tr>
+				<tr>
+					<td>Turn Right</td>
+					<td> &nbsp;&nbsp;&nbsp;</td>
+					<td> Right arrow key </td>
+				</tr>
+				<tr>
+					<td>Reverse</td>
+					<td>&nbsp;&nbsp;&nbsp; </td>
+					<td> Down arrow key </td>
+				</tr>
+				<tr>
+					<td>Change Camera Angle</td>
+					<td> &nbsp;&nbsp;&nbsp;</td>
+					<td> X </td>
+				</tr>
+				<tr>
+					<td>Change Difficulty</td>
+					<td> &nbsp;&nbsp;&nbsp;</td>
+					<td> Z </td>
+				</tr>
+			</table>
+			<h4> Power Pellets </h4>
+			<p> Power pellets are white pellets placed around the map. Each Power Pellet is worth 5 points, and if you eat one then Pac-Man will be invincible for 10 seconds. During this time, if you eat a ghost you will gain 100 points and the ghost will respawn. </p>
+			<h4> Difficulty </h4>
+			<p> The difficulty key will change the difficulty by one step per key press. Default is Medium, one press takes you to Hard, another press takes you to Easy, and a third will take you back to Medium where the cycle continues.</p>
+		  </div>
+		  <div class="modal-footer">
+			Created by Christopher Pirillo
+			<button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+		  </div>
+		</div>
+	  </div>
+	</div>
+
+<script>
+	var numLives = 3;
+	var world, body, shape, bshape;
+	var scene, quaternionNode, translationNode;
+	var timeStep = 1 / 60;
+	var scenewidth = 1000, sceneheight = 1000;
+	var keyboard;
+	var score = 0;
+	var cannonDebugRenderer;
+	var camDirNum = 2;
+	var ghostMat = new CANNON.Material();
+	var wasPressed = {};
+	var plane, ball, ball1, wasll1, wall2, wshape1, wshape2, wbody1, wbody2;
+	var pellets = [], tpellets = [];
+	var walls = [];
+	var ghosts = [];
+	var tghosts = [];
+	var toRemove = [];
+	var skyboxMesh;
+	var camDir = "up";
+	var chaseCam = true;
+	var diffVelocity = 250;
+	var invincible = false;
+	var pps = [];
+	var tpps = [];
+	var pacVel = [0, 0, 0];
+	
+	initThree();
+	loadSounds();
+	initCannon();
+	GenerateSkybox();
+	GenerateScoreboard();
+	generatePowerPellets();
+	animate();
+	updateNumLives();
+
+	$('#play').hide();
+
+	keyboard.domElement.addEventListener('keyup', function(event){
+		if( keyboard.eventMatches(event, 'left') ){
+			wasPressed['left']	= false;
+		}
+		if( keyboard.eventMatches(event, 'right') ){
+			wasPressed['right']	= false;
+		}
+		if( keyboard.eventMatches(event, 'up') ){
+			wasPressed['up']	= false;
+		}
+		if( keyboard.eventMatches(event, 'down') ){
+			wasPressed['down']	= false;
+		}
+		if( keyboard.eventMatches(event, 'x') ){
+			wasPressed['x']	= false;
+			if(chaseCam) {
+				skyCamera();
+			}
+
+			chaseCam = !chaseCam;
+		}
+		if( keyboard.eventMatches(event, 'z') ){
+			if(diffVelocity == 400) {
+				diffVelocity = 100;
+			}
+			else if(diffVelocity == 100) {
+				diffVelocity = 250;
+			}
+			else if(diffVelocity == 250) {
+				diffVelocity = 400;
+			}
+			wasPressed['z']	= false;
+		}
+	});
+	
+	var explode, one, two, three, four, five;
+	var wakkaAudio, deathAudio, wallAudio;
+	function loadSounds()
+	{
+		wakkaAudio = new Audio("sounds/pacman_score.wav");
+		deathAudio = new Audio("sounds/pacman_death.wav");
+		wallAudio = new Audio("sounds/1.mp3");
+	}
+	
+	function mod(n, m) {
+		return ((n % m) + m) % m;
+	}
+
+	function muteSound() {
+		$("#mute").hide();
+		$("#play").show();
+		$(".audio-player")[0].pause();
+	}
+
+	function playSound() {
+		$("#mute").show();
+		$("#play").hide();
+		$(".audio-player")[0].play();
+	}	
+
+	var textMesh;
+	function GenerateScoreboard() {
+		var material = new THREE.MeshBasicMaterial({
+			color: 0xdddddd
+		});
+		var textGeom = new THREE.TextGeometry( 'Score: '+score, {
+			size: 3,
+			height: 1,
+			font: 'helvetiker',
+			weight: 'normal'
+		});
+		textMesh = new THREE.Mesh( textGeom, material );
+		textMesh.rotation.x = Math.PI / 2;
+		textMesh.rotation.y = 0;
+		textMesh.position.z = pacman.position.z + 10;
+		textMesh.position.x = pacman.position.x;
+		textMesh.position.y = pacman.position.y;
+		updateScoreboardPosition();
+		scene.add(textMesh);
+	}
+
+	function updateScoreboardPosition() {
+		if(chaseCam) {
+			switch (camDirNum) {
+				case 0:
+					textMesh.rotation.x = Math.PI / 2;
+					textMesh.rotation.y = Math.PI;
+					textMesh.position.z = pacman.position.z + 15;
+					textMesh.position.x = pacman.position.x - 10;
+					textMesh.position.y = pacman.position.y - 10;
+					break;
+
+				case 1:
+					textMesh.rotation.x = Math.PI / 2;
+					textMesh.rotation.y = Math.PI / 2;
+					textMesh.position.z = pacman.position.z + 15;
+					textMesh.position.x = pacman.position.x - 10;
+					textMesh.position.y = pacman.position.y + 10;
+					break;
+
+				case 2:
+					textMesh.rotation.x = Math.PI / 2;
+					textMesh.rotation.y = 0;
+					textMesh.position.z = pacman.position.z + 15;
+					textMesh.position.x = pacman.position.x + 10;
+					textMesh.position.y = pacman.position.y + 10;
+					break;
+
+				case 3:
+					textMesh.rotation.x = Math.PI / 2;
+					textMesh.rotation.y = 3*Math.PI / 2;
+					textMesh.position.z = pacman.position.z + 15;
+					textMesh.position.x = pacman.position.x + 10;
+					textMesh.position.y = pacman.position.y - 10;
+					break;
+			}
+		}
+
+		else {
+			textMesh.rotation.x = 0;
+			textMesh.rotation.y = 0;
+			textMesh.position.z = camera.position.z - 50;
+			textMesh.position.x = camera.position.x + 10;
+			textMesh.position.y = camera.position.y + 15;
+		}
+	}
+
+	function GenerateSkybox() {
+
+		var skyTexture = THREE.ImageUtils.loadTexture("images/rainbowbg.png");
+		
+		skyboxMesh = new THREE.Mesh(new THREE.SphereGeometry(1000,24,24), new THREE.MeshLambertMaterial({map:skyTexture}));
+		skyboxMesh.scale.x = -1;
+		skyboxMesh.emissive = new THREE.Color(0x404040);
+		scene.add(skyboxMesh);
+	
+	}
+
+	var gameOverMesh;
+	function gameOver() {
+		var material = new THREE.MeshBasicMaterial({
+			color: 0xFF0000
+		});
+		var textGeom = new THREE.TextGeometry( 'GAME OVER', {
+			size: 20,
+			height: 1,
+			font: 'helvetiker',
+			weight: 'normal'
+		});
+		gameOverMesh = new THREE.Mesh( textGeom, material );
+		gameOverMesh.rotation.x = 0;
+		gameOverMesh.rotation.y = 0;
+		gameOverMesh.position.set(-75, 0, 600);
+		scene.add(gameOverMesh);
+	}
+
+	function initThree() 
+	{
+		keyboard = new THREEx.KeyboardState();
+
+		scene = new THREE.Scene();
+		
+		camera = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 1, 3000 );
+		camera.position.z = 700;
+		camera.lookAt( scene.position );
+		scene.add( camera );
+
+		var planegeo = new THREE.BoxGeometry( scenewidth, sceneheight, 4 );
+		var planemat = new THREE.MeshLambertMaterial({color:0x404040});
+		plane = new THREE.Mesh( planegeo, planemat );
+		scene.add( plane );
+		
+		renderer = new THREE.WebGLRenderer();
+		renderer.setClearColor( 0x000000, 1.0 );
+		renderer.setSize( window.innerWidth*.99, window.innerHeight*.99 );
+		renderer.shadowMapEnabled = true;
+
+		addSpotLights();
+
+		var ambientLight = new THREE.AmbientLight(0x808080);
+		scene.add(ambientLight);
+		
+		document.body.appendChild( renderer.domElement );
+	}
+
+	function addSpotLights() {
+		var spotLight = [];
+		spotLight.push(new THREE.SpotLight(0x0000FF, 5.0));
+		spotLight.push(new THREE.SpotLight(0xFF0000, 5.0));
+		spotLight.push(new THREE.SpotLight(0x0000FF, 5.0));
+		spotLight.push(new THREE.SpotLight(0xFF0000, 5.0));
+		spotLight.push(new THREE.SpotLight(0x66FF33, 5.0));
+		spotLight.push(new THREE.SpotLight(0x66FF33, 5.0));
+		for(var i = 0; i < spotLight.length; i++) {
+			spotLight[i].castShadow = true;
+			spotLight[i].shadowCameraNear = 200;
+			spotLight[i].shadowCameraFar = camera.far;
+			spotLight[i].shadowCameraFov = 50;
+
+			spotLight[i].shadowBias = -0.00022;
+			spotLight[i].shadowDarkness = 0.5;
+
+			spotLight[i].shadowMapWidth = 2048;
+			spotLight[i].shadowMapHeight = 2048;
+		}
+		spotLight[0].position.set(500, 500, 500);
+		spotLight[1].position.set(500, -500, 500);
+		spotLight[2].position.set(-500, 500, 500);
+		spotLight[3].position.set(-500, -500, 500);
+		spotLight[4].position.set(500, -500, 500);
+		spotLight[5].position.set(-500, -500, 500);
+
+		scene.add( spotLight[0] );
+		scene.add( spotLight[3] );
+		scene.add( spotLight[4] );
+
+		function addSL034() {
+			scene.remove(spotLight[1]);
+			scene.remove(spotLight[2]);
+			scene.remove(spotLight[5]);
+			scene.add(spotLight[0]);
+			scene.add(spotLight[3]);
+			scene.add(spotLight[4]);
+			setTimeout(addSL125, 250);
+		}
+		function addSL125() {
+			scene.remove(spotLight[0]);
+			scene.remove(spotLight[3]);
+			scene.add(spotLight[1]);
+			scene.add(spotLight[2]);
+			setTimeout(addSL034, 250);
+		}
+
+		setTimeout(addSL125, 250);
+
+
+	}
+	
+	var mat1, basicMaterial;
+	function initCannon() 
+	{
+		world = new CANNON.World();
+		world.gravity.set( 0, 0, 0 );
+		world.broadphase = new CANNON.NaiveBroadphase();
+		world.solver.iterations = 5;
+		world.defaultContactMaterial.contactEquationStiffness = 1e8;
+		world.defaultContactMaterial.contactEquationRelaxation = 10;
+		
+		// ground plane
+		basicMaterial = new CANNON.Material();
+		var groundShape = new CANNON.Plane();
+		var groundBody = new CANNON.Body({ mass: 0, material: basicMaterial });
+		groundBody.addShape(groundShape);
+		world.addBody(groundBody);	
+
+		mat1 = new CANNON.Material();
+
+		cannonDebugRenderer = new THREE.CannonDebugRenderer( scene, world );
+
+		makePacMan();
+		buildWalls();
+		generatePellets();
+		buildMaze();
+		buildGhost(0,0, 0x00FFFF);
+		buildGhost(250,250, 0xFF66FF);
+		buildGhost(250,-250, 0x66FF33);
+		buildGhost(-250,250, 0xFFFFFF);
+		buildGhost(-250,-250, 0xFFFF00);
+	}
+
+	function skyCamera() {
+		camera.position.z = 750;
+		camera.position.x = 0;
+		camera.position.y = 0;
+		camera.rotation.z = 0;
+		camera.lookAt(scene.position);
+	}
+	
+	function animate() 
+	{
+		skyboxMesh.rotation.x += .1;
+		updateScoreboardPosition();
+
+		if(keyboard.pressed("x") && !wasPressed["x"] ) {
+			
+		}
+
+		pacman.position.z = 5;
+
+		pacman.velocity.set(pacVel[0], pacVel[1], pacVel[2]);
+
+		if(keyboard.pressed("z") && !wasPressed["z"] ) {
+			
+		}
+
+		var TPNearIndexJ = parseInt(pacman.position.y / 27) + 18;
+		var TPNearIndexI = parseInt(pacman.position.x / 27) + 18;
+
+		// Check all pellets near PacMan
+
+		if(TPNearIndexI < pellets.length && TPNearIndexJ < pellets[0].length)
+			if(pellets[TPNearIndexI][TPNearIndexJ].position.distanceTo(pacman.position) < 15) {
+				if(tpellets[TPNearIndexI][TPNearIndexJ].inScene){
+					tpellets[TPNearIndexI][TPNearIndexJ].inScene = false;
+					scene.remove(tpellets[TPNearIndexI][TPNearIndexJ]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(TPNearIndexI + 1 < pellets.length && TPNearIndexJ - 1 >= 0)
+			if(pellets[TPNearIndexI + 1][TPNearIndexJ - 1].position.distanceTo(pacman.position) < 15) {
+				if(tpellets[TPNearIndexI + 1][TPNearIndexJ - 1].inScene){
+					tpellets[TPNearIndexI + 1][TPNearIndexJ - 1].inScene = false;
+					scene.remove(tpellets[TPNearIndexI + 1][TPNearIndexJ - 1]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(TPNearIndexI + 1< pellets.length && TPNearIndexJ < pellets[0].length)
+			if(pellets[TPNearIndexI + 1][TPNearIndexJ].position.distanceTo(pacman.position) < 15) {
+				if(tpellets[TPNearIndexI + 1][TPNearIndexJ].inScene){
+					tpellets[TPNearIndexI + 1][TPNearIndexJ].inScene = false;
+					scene.remove(tpellets[TPNearIndexI + 1][TPNearIndexJ]);
+					score++;
+					updateScoreboard();
+				}
+			} 
+
+		if(TPNearIndexI + 1 < pellets.length && TPNearIndexJ + 1 < pellets[0].length)
+			if(pellets[TPNearIndexI + 1][TPNearIndexJ + 1].position.distanceTo(pacman.position) < 15) {
+				if(tpellets[TPNearIndexI + 1][TPNearIndexJ + 1].inScene){
+					tpellets[TPNearIndexI + 1][TPNearIndexJ + 1].inScene = false;
+					scene.remove(tpellets[TPNearIndexI + 1][TPNearIndexJ + 1]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(TPNearIndexI < pellets.length && TPNearIndexJ + 1 < pellets[0].length)
+			if(pellets[TPNearIndexI][TPNearIndexJ + 1].position.distanceTo(pacman.position) < 15) {
+			if(tpellets[TPNearIndexI][TPNearIndexJ + 1].inScene){
+					tpellets[TPNearIndexI][TPNearIndexJ + 1].inScene = false;
+					scene.remove(tpellets[TPNearIndexI][TPNearIndexJ + 1]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(TPNearIndexI - 1 >= 0 && TPNearIndexJ + 1 < pellets[0].length)
+			if(pellets[TPNearIndexI - 1][TPNearIndexJ + 1].position.distanceTo(pacman.position) < 15) {
+			if(tpellets[TPNearIndexI - 1][TPNearIndexJ + 1].inScene){
+					tpellets[TPNearIndexI - 1][TPNearIndexJ + 1].inScene = false;
+					scene.remove(tpellets[TPNearIndexI - 1][TPNearIndexJ + 1]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(TPNearIndexI - 1 >= 0 && TPNearIndexJ < pellets[0].length)
+			if(pellets[TPNearIndexI - 1][TPNearIndexJ].position.distanceTo(pacman.position) < 15) {
+			if(tpellets[TPNearIndexI - 1][TPNearIndexJ].inScene){
+					tpellets[TPNearIndexI - 1][TPNearIndexJ].inScene = false;
+					scene.remove(tpellets[TPNearIndexI - 1][TPNearIndexJ]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(TPNearIndexI - 1 >= 0 && TPNearIndexJ - 1 >= 0)
+			if(pellets[TPNearIndexI - 1][TPNearIndexJ - 1].position.distanceTo(pacman.position) < 15) {
+			if(tpellets[TPNearIndexI - 1][TPNearIndexJ - 1].inScene){
+					tpellets[TPNearIndexI - 1][TPNearIndexJ - 1].inScene = false;
+					scene.remove(tpellets[TPNearIndexI - 1][TPNearIndexJ - 1]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(TPNearIndexI < pellets.length && TPNearIndexJ - 1 >= 0)
+			if(pellets[TPNearIndexI][TPNearIndexJ - 1].position.distanceTo(pacman.position) < 15) {
+			if(tpellets[TPNearIndexI][TPNearIndexJ - 1].inScene){
+					tpellets[TPNearIndexI][TPNearIndexJ - 1].inScene = false;
+					scene.remove(tpellets[TPNearIndexI][TPNearIndexJ - 1]);
+					score++;
+					updateScoreboard();
+				}
+			}
+
+		if(chaseCam) {
+			if(camDir == "left") {
+				camera.position.z = 25;
+				camera.position.x = pacman.position.x + 30;
+				camera.position.y = pacman.position.y;
+				camera.lookAt(pacman.position);
+				camera.rotation.z = Math.PI/2;
+			}
+			else if(camDir == "right") {
+				camera.position.z = 25;
+				camera.position.x = pacman.position.x - 30;
+				camera.position.y = pacman.position.y;
+				camera.lookAt(pacman.position);
+				camera.rotation.z = -Math.PI/2;
+			}
+			else if(camDir == "up") {
+				camera.position.z = 25;
+				camera.position.x = pacman.position.x;
+				camera.position.y = pacman.position.y - 30;
+				camera.lookAt(pacman.position);
+				camera.rotation.z = 0;
+			}
+			else if(camDir == "down") {
+				camera.position.z = 25;
+				camera.position.x = pacman.position.x;
+				camera.position.y = pacman.position.y + 30;
+				camera.lookAt(pacman.position);
+				camera.rotation.z = Math.PI;
+			}
+		}
+
+		if(keyboard.pressed("left") && !wasPressed["left"] )
+		{
+			wasPressed["left"] = true;
+			camDirNum = mod((camDirNum - 1 ) , 4);
+			setPacVelocity();
+		}
+		else if(keyboard.pressed("right") && !wasPressed["right"] )
+		{
+			wasPressed["right"] = true;
+			camDirNum = mod((camDirNum + 1 ) , 4);
+			setPacVelocity();
+		}
+		else if(keyboard.pressed("up") && !wasPressed["up"] )
+		{
+			wasPressed["up"] = true;
+			setPacVelocity();
+		}
+		else if(keyboard.pressed("down") && !wasPressed["down"] )
+		{
+			wasPressed["down"] = true;
+			camDirNum = mod((camDirNum + 2 ) , 4);
+			setPacVelocity();
+		}
+
+		if(pacman.position.x > 500) {
+			pacman.position.x -= 1000;
+		}
+
+		if(pacman.position.x < -500) {
+			pacman.position.x += 1000;
+		}
+
+		if(pacman.position.y > 500) {
+			pacman.position.y -= 1000;
+		}
+
+		if(pacman.position.y < -500) {
+			pacman.position.y += 1000;
+		}
+
+		for(var i = 0; i < ghosts.length; i++) {
+			if(ghosts[i].position.x > 500) {
+				ghosts[i].position.x -= 990;
+			}
+
+			if(ghosts[i].position.x < -500) {
+				ghosts[i].position.x += 990;
+			}
+
+			if(ghosts[i].position.y > 500) {
+				ghosts[i].position.y -= 990;
+			}
+
+			if(ghosts[i].position.y < -500) {
+				ghosts[i].position.y += 990;
+			}
+		}
+
+
+		requestAnimationFrame( animate );
+		updatePhysics();
+		renderer.render( scene, camera );
+	}
+
+	function setPacVelocity() {
+		switch(camDirNum) {
+			case 0: 
+				camDir = "down";
+				pacman.velocity.set( 0, -diffVelocity, 0 );
+				pacVel = [0, -diffVelocity, 0];
+				break;
+
+			case 1: 
+				camDir = "left";
+				pacman.velocity.set( -diffVelocity, 0, 0 );
+				pacVel = [-diffVelocity, 0, 0];
+				break;
+			case 2: 
+				camDir = "up";
+				pacman.velocity.set( 0, diffVelocity, 0 );
+				pacVel = [0, diffVelocity, 0];
+				break;
+			default: 
+				camDir = "right";
+				pacman.velocity.set( diffVelocity, 0, 0 );
+				pacVel = [diffVelocity, 0, 0];
+		}
+	}
+
+	function updatePhysics() 
+	{
+		// Step the physics world
+		try{
+		world.step( timeStep );
+		}
+
+		catch(err) {
+			console.log(err);
+		}
+
+		for(var i = 0; i < toRemove.length; i++) {
+			world.remove(toRemove[i]);
+		}
+
+		tpacman.position.copy( pacman.position );
+		tpacman.quaternion.copy( pacman.quaternion );
+
+		for(var i = 0; i < ghosts.length; i++) {
+			ghosts[i].position.z = 5;
+			tghosts[i].position.copy( ghosts[i].position );
+			tghosts[i].quaternion.copy( ghosts[i].quaternion );
+			tghosts[i].rotation.x = Math.PI/2;
+		}
+	}
+
+	var pacman;
+	var tpacman;
+	var pacmat;
+
+	function makePacMan()
+	{
+		shape = new CANNON.Sphere( 10 );
+		pacmat = new CANNON.Material();
+		pacman = new CANNON.Body({mass: 1000, material:pacmat});
+		pacman.addShape( shape );
+		pacman.position.set( 0, -300, 10 );
+		pacman.name = "pacman";
+		world.addBody( pacman );
+
+		var ballgeo = new THREE.SphereGeometry( 10 );
+		var ballmat = new THREE.MeshPhongMaterial({color:0xFFFF00});
+		tpacman = new THREE.Mesh( ballgeo, ballmat );
+		tpacman.position.z = 10;
+		pacman.addEventListener('collide', function(oo) {
+			if(oo.body.name == 'ghost' && !invincible) {
+				deathAudio.play();
+				numLives -= 1;
+				updateNumLives();
+
+				if(numLives == 0) {
+					chaseCam = false;
+					skyCamera();
+					toRemove.push(pacman);
+					scene.remove(tpacman);
+					gameOver();
+				}
+
+				else {
+					pacman.position.set(0, -300, 5);
+					pacVel = [0,0,0];
+					camDirNum = 2;
+					camDir = "up";
+					setTimeout(function(){
+						pacman.velocity.set(0, 0, 0);
+					}, 10);
+				}
+			}
+
+			if(oo.body.name == 'wall') {
+				wallAudio.play();
+			}
+		})
+		scene.add( tpacman );
+
+		var pacBallContact = new CANNON.ContactMaterial( pacmat, basicMaterial, {friction: 1.0, restitution: 0} );
+	}
+
+	function buildWalls()
+	{
+		var w1, w2, w3, w4, tw1, tw2, tw3, tw4, w5, tw5, w6, tw6, w7, tw7, w8, tw8;
+		var wallDist = 495;
+		var wallmat = new CANNON.Material();
+
+		//horiz
+		shape = new CANNON.Box( new CANNON.Vec3(230, 5, 10));
+		w1 = new CANNON.Body( {mass:0, material:wallmat} );
+		w1.addShape( shape );
+		w1.position.set( -260, wallDist, 10);
+		world.addBody( w1 );
+
+		var boxgeo = new THREE.BoxGeometry( 460, 10, 20 );
+		var twallmat = new THREE.MeshPhongMaterial({color: 0x0000FF});
+		tw1 = new THREE.Mesh( boxgeo, twallmat);
+		tw1.position.set( -260, wallDist, 10);
+		scene.add( tw1 );
+
+		shape = new CANNON.Box( new CANNON.Vec3(230, 5, 10));
+		w2 = new CANNON.Body( {mass:0, material:wallmat} );
+		w2.addShape( shape );
+		w2.position.set( 260, wallDist, 10);
+		world.addBody( w2 );
+
+		tw2 = new THREE.Mesh( boxgeo, twallmat);
+		tw2.position.set( 260, wallDist, 10);
+		scene.add( tw2 );
+
+		shape = new CANNON.Box( new CANNON.Vec3(230, 5, 10));
+		w5 = new CANNON.Body( {mass:0, material:wallmat} );
+		w5.addShape( shape );
+		w5.position.set( 260, -wallDist, 10);
+		world.addBody( w5 );
+
+		tw5 = new THREE.Mesh( boxgeo, twallmat);
+		tw5.position.set( 260, -wallDist, 10);
+		scene.add( tw5 );
+
+		shape = new CANNON.Box( new CANNON.Vec3(230, 5, 10));
+		w8 = new CANNON.Body( {mass:0, material:wallmat} );
+		w8.addShape( shape );
+		w8.position.set( -260, -wallDist, 10);
+		world.addBody( w8 );
+
+		tw8 = new THREE.Mesh( boxgeo, twallmat);
+		tw8.position.set( -260, -wallDist, 10);
+		scene.add( tw8 );
+
+		//vert
+		shape = new CANNON.Box( new CANNON.Vec3(5, 230, 10));
+		w3 = new CANNON.Body( {mass:0, material:wallmat} );
+		w3.addShape( shape );
+		w3.position.set( -wallDist, -260, 10);
+		world.addBody( w3 );
+
+		boxgeo = new THREE.BoxGeometry( 10, 460, 20 );
+		tw3 = new THREE.Mesh( boxgeo, twallmat);
+		tw3.position.set( -wallDist, -260, 10);
+		scene.add( tw3 );
+
+		shape = new CANNON.Box( new CANNON.Vec3(5, 230, 10));
+		w4 = new CANNON.Body( {mass:0, material:wallmat} );
+		w4.addShape( shape );
+		w4.position.set( wallDist, 260, 10);
+		world.addBody( w4 );
+
+		tw4 = new THREE.Mesh( boxgeo, twallmat);
+		tw4.position.set( wallDist, 260, 10);
+		scene.add( tw4 );
+
+		w6 = new CANNON.Body( {mass:0, material:wallmat} );
+		w6.addShape( shape );
+		w6.position.set( wallDist, -260, 10);
+		world.addBody( w6 );
+
+		boxgeo = new THREE.BoxGeometry( 10, 460, 20 );
+		tw6 = new THREE.Mesh( boxgeo, twallmat);
+		tw6.position.set( wallDist, -260, 10);
+		scene.add( tw6 );
+
+		shape = new CANNON.Box( new CANNON.Vec3(5, 230, 10));
+		w7 = new CANNON.Body( {mass:0, material:wallmat} );
+		w7.addShape( shape );
+		w7.position.set( -wallDist, 260, 10);
+		world.addBody( w7 );
+
+		tw7 = new THREE.Mesh( boxgeo, twallmat);
+		tw7.position.set( -wallDist, 260, 10);
+		scene.add( tw7 );
+
+		wireframe1 = new THREE.EdgesHelper( tw1, 0x000000 );
+		scene.add( wireframe1 );
+		wireframe2 = new THREE.EdgesHelper( tw2, 0x000000 );
+		scene.add( wireframe2 );
+		wireframe3 = new THREE.EdgesHelper( tw3, 0x000000 );
+		scene.add( wireframe3 );
+		wireframe4 = new THREE.EdgesHelper( tw4, 0x000000 );
+		scene.add( wireframe4 );
+		wireframe5 = new THREE.EdgesHelper( tw5, 0x000000 );
+		scene.add( wireframe5 );
+		wireframe6 = new THREE.EdgesHelper( tw6, 0x000000 );
+		scene.add( wireframe6 );
+		wireframe7 = new THREE.EdgesHelper( tw7, 0x000000 );
+		scene.add( wireframe7 );
+		wireframe8 = new THREE.EdgesHelper( tw8, 0x000000 );
+		scene.add( wireframe8 );
+
+	}
+
+	
+	function generatePellets() {
+		var xb = 475;
+		var yb = 475;
+		var indexi = 0;
+		for(var i = -xb; i <= xb; i += 27) {
+			var indexj = 0;
+			pellets[indexi] = [];
+			tpellets[indexi] = [];
+			for(var j = -yb; j <= yb; j += 27) {
+				var shape = new CANNON.Sphere(3);
+				
+				var pellet = new CANNON.Body({mass: 1, material:mat1});
+				pellet.addShape( shape );
+				pellet.position.set( i, j, 10 );
+				pellet.i = indexi;
+				pellet.j = indexj;
+				pellet.name = "PELLET";
+				pellet.collisionResponse = 0;
+				pellets[indexi].push(pellet);
+
+				var ballgeo = new THREE.SphereGeometry( 3 );
+				var ballmat = new THREE.MeshLambertMaterial({color:'red'});
+				var tpellet = new THREE.Mesh( ballgeo, ballmat );
+				tpellet.inScene = true;
+				tpellet.position.x = i;
+				tpellet.position.y = j;
+				tpellet.position.z = 10;
+				tpellets[indexi].push(tpellet);
+				scene.add( tpellet );
+
+				indexj += 1;
+
+			}
+			indexi += 1;
+		}
+	}
+
+	function generatePowerPellets() {
+		insertPowerPellet(0,0,0);
+		insertPowerPellet(-400,0,1);
+		insertPowerPellet(400,0,2);
+		insertPowerPellet(0,400,3);
+		insertPowerPellet(0,-400,4);
+	}
+
+
+	function insertPowerPellet(xpos, ypos, index) {
+		var shape = new CANNON.Sphere(5);
+		var pp = new CANNON.Body({mass: 1, material:mat1});
+		pp.addShape( shape );
+		pp.position.set( xpos, ypos, 10 );
+		pp.i = index;
+		pp.name = "powerpellet";
+		pp.collisionResponse = 0;
+		world.addBody( pp );
+		pp.addEventListener('collide', function(oo) {
+			if(oo.body.name == "pacman"){
+				var p = this;
+				scene.remove(tpps[p.i]);
+				toRemove.push(p);
+				score += 5;
+				updateScoreboard();
+
+				startInvincibility();
+				setTimeout(function(){
+					backToNormal();
+				}, 10000);
+			}
+
+		});
+		pps.push(pp);
+
+		var ballgeo = new THREE.SphereGeometry( 5 );
+		var ballmat = new THREE.MeshLambertMaterial({color:'white'});
+		var tpp = new THREE.Mesh( ballgeo, ballmat );
+		tpp.position.x = xpos;
+		tpp.position.y = ypos;
+		tpp.position.z = 10;
+		tpps.push(tpp);
+		scene.add( tpp );
+	}
+
+	function startInvincibility() {
+		invincible = true;
+		for(var i = 0; i < tghosts.length; i++) {
+			tghosts[i].material.color.set('black');
+		}
+	}
+
+	function backToNormal() {
+		invincible = false;
+		for(var i = 0; i < tghosts.length; i++) {
+			tghosts[i].material.color.set(tghosts[i].normalColor);
+		}
+	}
+
+	function updateScoreboard() {
+		scene.remove(textMesh);
+		wakkaAudio.play();
+		GenerateScoreboard();
+	}
+
+	function buildMaze() {
+		for(var i = 0; i < wallJSON.length; i++) {
+			obj = wallJSON[i];
+			insertWall(parseInt(obj[0]), parseInt(obj[1]), obj[2]);
+
+		}
+	}
+
+
+	function insertWall(xpos, ypos, horiz) {
+		var dis = 30;
+		var shape;
+		var wall;
+		var boxgeo;
+		if(horiz){
+			shape = new CANNON.Box(new CANNON.Vec3(dis, 2.5, 20));
+			wall = new CANNON.Body({mass: 0, material: basicMaterial});
+			boxgeo = new THREE.BoxGeometry( 2*dis, 10, 30 );
+		}
+		else{
+			shape = new CANNON.Box(new CANNON.Vec3(2.5, dis, 20));
+			wall = new CANNON.Body({mass: 0, material: basicMaterial});
+			boxgeo = new THREE.BoxGeometry( 10, 2*dis, 30 );
+		}
+		wall.addShape(shape);
+		wall.position.set(xpos, ypos, 10);
+		wall.name = "wall";
+		world.addBody( wall );
+		walls.push(wall);
+		var twallmat = new THREE.MeshLambertMaterial({color: 'blue'});
+		var twall = new THREE.Mesh( boxgeo, twallmat);
+		twall.position.set( xpos, ypos, 10);
+		scene.add( twall );
+	}
+
+	function buildGhost(xpos, ypos, color) {
+		var body = new CANNON.Box(new CANNON.Vec3(5, 5, 2));
+		var ghost = new CANNON.Body({mass: 100, material: ghostMat});
+		ghost.addShape(body);
+
+		world.addBody( ghost );
+
+		var bodygeom = new THREE.CylinderGeometry( 10, 10, 30 );
+		var headgeom = new THREE.SphereGeometry(10);
+		var tghostMat = new THREE.MeshLambertMaterial({color: color});
+
+		var tghost = new THREE.Mesh(bodygeom, tghostMat);
+		var tgh = new THREE.Mesh(headgeom, tghostMat);
+
+		tghost.normalColor = color;
+		ghost.startPositionx = xpos;
+		ghost.startPositiony = ypos;
+		tgh.position.y = 13;
+		tghost.add(tgh);
+		scene.add(tghost);
+		ghost.position.set(xpos, ypos, 5);
+		ghost.velocity.set(diffVelocity, 0, 0);
+		ghost.fixedRotation = true;
+		ghost.updateMassProperties();
+
+		ghost.name = "ghost";
+		ghost.setRandomDirection = function() {
+			var newDir = parseInt(Math.floor((Math.random() * 4)));
+			switch (newDir) {
+				case 0: 
+					this.velocity.set( 0, -diffVelocity, 0 );
+					this.quaternion.setFromAxisAngle(new CANNON.Vec3(1,0,0),Math.PI/2);
+					break;
+				case 1: 
+					this.velocity.set( -diffVelocity, 0, 0 );
+					break;
+				case 2: 
+					this.velocity.set( 0, diffVelocity, 0 );
+					this.quaternion.setFromAxisAngle(new CANNON.Vec3(1,0,0),-Math.PI/2);
+					break;
+				default: 
+					this.velocity.set( diffVelocity, 0, 0 );
+			}
+		}
+
+		ghost.startRandomTurns = function() {
+			setTimeout(function() {
+				ghost.setRandomDirection();
+				ghost.startRandomTurns();
+			}, 5000);
+		}
+
+		ghost.addEventListener('collide', function(oo) {
+			if(oo.body.name != "PELLET"){
+				ghost.setRandomDirection();
+			}
+
+			if(invincible) {
+				if(oo.body.name == "pacman") {
+					score += 100;
+					updateScoreboard();
+					ghost.position.x = ghost.startPositionx;
+					ghost.position.y = ghost.startPositiony;
+				}
+			}
+		});
+
+		ghosts.push(ghost);
+		tghosts.push(tghost);
+
+		ghost.startRandomTurns();
+	}
+
+	function updateNumLives() {
+		var htmlStr =  '<i class="icon-pacman"></i>'
+		var resStr = '<span style="color:yellow">';
+		for( var i = 0; i < numLives; i++) {
+			resStr += htmlStr;
+		}
+		resStr += "</span>";
+		$('#lives').html(resStr);
+	}
+
+</script>
+
+<script>
+</script>
+
+</body>
+
+</html>
